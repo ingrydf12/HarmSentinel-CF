@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harm Sentinel</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #ffffff; --txt: #1b1f24; --mut: #6b7280; --line: #d9dde3;
+    --ok: #16a34a; --warn: #ea8a00; --bad: #dc2626; --acc: #2563eb; --cpu: #2563eb; --case: #db2777;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151a; --card: #1b2028; --txt: #e8eaee; --mut: #93a0b2; --line: #2b3340;
+      --ok: #34d399; --warn: #fbbf24; --bad: #f87171; --acc: #60a5fa; --cpu: #60a5fa; --case: #f472b6;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: var(--bg); color: var(--txt);
+         font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--mut); font-size: 13px; margin-bottom: 16px; display: flex; gap: 8px; align-items: center; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--bad); }
+  .dot.on { background: var(--ok); }
+  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin-bottom: 12px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+  .lbl { font-size: 12px; color: var(--mut); text-transform: uppercase; letter-spacing: .04em; }
+  .val { font-size: 30px; font-weight: 600; margin-top: 4px; }
+  .val small { font-size: 14px; font-weight: 400; color: var(--mut); }
+  .state { font-size: 13px; margin-top: 4px; font-weight: 600; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+  .row { display: grid; gap: 12px; grid-template-columns: 2fr 1fr; }
+  @media (max-width: 760px) { .row { grid-template-columns: 1fr; } }
+  canvas { width: 100%; height: 220px; display: block; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--mut); margin-top: 6px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; }
+  .ctl { display: flex; flex-direction: column; gap: 10px; }
+  button { font: inherit; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line);
+           background: var(--card); color: var(--txt); cursor: pointer; }
+  button:hover { border-color: var(--acc); }
+  button.p { background: var(--acc); border-color: var(--acc); color: #fff; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  input[type=range] { width: 100%; }
+  svg.flap { width: 100%; height: 90px; }
+  .flapbar { transform-origin: 50px 45px; transition: transform .4s; }
+  #log { font: 12px ui-monospace, Consolas, monospace; color: var(--mut); max-height: 90px; overflow: auto;
+         white-space: pre-wrap; margin-top: 8px; }
+</style>
+</head>
+<body>
+  <h1>Harm Sentinel</h1>
+  <div class="sub"><span class="dot" id="dot"></span><span id="conn">conectando…</span></div>
+
+  <div class="grid">
+    <div class="card"><div class="lbl">CPU</div><div class="val" id="cpu">–<small> °C</small></div>
+      <div class="state" id="cpuState"></div></div>
+    <div class="card"><div class="lbl">GPU</div><div class="val" id="gpu">–<small> °C</small></div></div>
+    <div class="card"><div class="lbl">Gabinete (NTC)</div><div class="val" id="case">–<small> °C</small></div></div>
+    <div class="card"><div class="lbl">Aba (servo)</div><div class="val" id="servo">–<small> °</small></div>
+      <div class="state" id="mode"></div></div>
+  </div>
+
+  <div class="row">
+    <div class="card">
+      <div class="lbl">Histórico</div>
+      <canvas id="chart"></canvas>
+      <div class="legend">
+        <span><i style="background:var(--cpu)"></i>CPU</span>
+        <span><i style="background:var(--case)"></i>Gabinete</span>
+        <span><i style="background:var(--warn)"></i>70 °C</span>
+        <span><i style="background:var(--bad)"></i>85 °C</span>
+      </div>
+    </div>
+
+    <div class="card ctl">
+      <div class="lbl">Controles</div>
+      <svg class="flap" viewBox="0 0 100 90" aria-label="Aba de ventilação">
+        <rect x="10" y="30" width="80" height="30" rx="4" fill="none" stroke="var(--line)" stroke-width="2"/>
+        <g class="flapbar" id="flapbar"><rect x="46" y="45" width="8" height="-1"/>
+          <rect x="50" y="41" width="40" height="8" rx="2" fill="var(--acc)"/></g>
+        <circle cx="50" cy="45" r="4" fill="var(--txt)"/>
+      </svg>
+      <div class="two">
+        <button onclick="servo(0)">Fechar aba</button>
+        <button onclick="servo(90)">Abrir aba</button>
+      </div>
+      <input type="range" id="slider" min="0" max="90" value="0" oninput="servo(+this.value)">
+      <div class="two">
+        <button class="p" onclick="send({cmd:'mode',auto:true})">Modo auto</button>
+        <button onclick="send({cmd:'mode',auto:false})">Modo manual</button>
+      </div>
+      <div class="two">
+        <button onclick="send({cmd:'buzzer',on:true})">Buzzer on</button>
+        <button onclick="send({cmd:'buzzer',on:false})">Buzzer off</button>
+      </div>
+      <div id="log"></div>
+    </div>
+  </div>
+
+<script>
+  const $ = id => document.getElementById(id);
+  const MAX = 120;
+  const hist = { cpu: [], case: [] };
+  let ws, last = 0;
+
+  function log(t) { const l = $("log"); l.textContent = (t + "\n" + l.textContent).slice(0, 600); }
+
+  function connect() {
+    ws = new WebSocket("ws://" + location.host + "/ws");
+    ws.onopen = () => { $("dot").classList.add("on"); $("conn").textContent = "conectado"; };
+    ws.onclose = () => {
+      $("dot").classList.remove("on"); $("conn").textContent = "desconectado, tentando de novo…";
+      setTimeout(connect, 1500);
+    };
+    ws.onmessage = e => {
+      try { update(JSON.parse(e.data)); } catch (_) {}
+    };
+  }
+
+  function send(obj) {
+    if (ws && ws.readyState === 1) { ws.send(JSON.stringify(obj)); log("→ " + JSON.stringify(obj)); }
+  }
+
+  function servo(a) {
+    const now = Date.now();
+    if (now - last < 80) return;
+    last = now;
+    $("slider").value = a;
+    send({ cmd: "servo", angle: a });
+  }
+
+  function classe(t) { return t >= 85 ? "bad" : t >= 70 ? "warn" : "ok"; }
+
+  function update(d) {
+    if (d.cpu !== undefined) {
+      $("cpu").firstChild.nodeValue = d.cpu.toFixed(1);
+      const c = classe(d.cpu);
+      $("cpu").className = "val " + c;
+      $("cpuState").className = "state " + c;
+      $("cpuState").textContent = c === "bad" ? "CRÍTICO" : c === "warn" ? "Elevada" : "Normal";
+      hist.cpu.push(d.cpu); if (hist.cpu.length > MAX) hist.cpu.shift();
+    }
+    if (d.gpu !== undefined) $("gpu").firstChild.nodeValue = d.gpu.toFixed(1);
+    if (d.case !== undefined) {
+      $("case").firstChild.nodeValue = d.case.toFixed(1);
+      hist.case.push(d.case); if (hist.case.length > MAX) hist.case.shift();
+    }
+    if (d.servo !== undefined) {
+      $("servo").firstChild.nodeValue = d.servo;
+      $("flapbar").style.transform = "rotate(" + (-d.servo) + "deg)";
+    }
+    if (d.auto !== undefined) $("mode").textContent = d.auto ? "Modo automático" : "Modo manual";
+    if (d.alert) log("⚠ alerta ativo (buzzer)");
+    draw();
+  }
+
+  function draw() {
+    const cv = $("chart"), dpr = window.devicePixelRatio || 1;
+    const w = cv.clientWidth, h = cv.clientHeight;
+    cv.width = w * dpr; cv.height = h * dpr;
+    const g = cv.getContext("2d"); g.scale(dpr, dpr);
+    const css = getComputedStyle(document.documentElement);
+    const col = n => css.getPropertyValue(n).trim();
+    const lo = 20, hi = 100, pad = 24;
+    const y = v => h - pad - (Math.min(Math.max(v, lo), hi) - lo) / (hi - lo) * (h - pad - 8);
+
+    g.font = "11px system-ui"; g.fillStyle = col("--mut"); g.strokeStyle = col("--line"); g.lineWidth = 1;
+    for (let v = 20; v <= 100; v += 20) {
+      g.beginPath(); g.moveTo(34, y(v)); g.lineTo(w, y(v)); g.stroke();
+      g.fillText(v, 4, y(v) + 4);
+    }
+    [[70, "--warn"], [85, "--bad"]].forEach(([v, c]) => {
+      g.strokeStyle = col(c); g.setLineDash([4, 4]);
+      g.beginPath(); g.moveTo(34, y(v)); g.lineTo(w, y(v)); g.stroke(); g.setLineDash([]);
+    });
+    [["cpu", "--cpu"], ["case", "--case"]].forEach(([k, c]) => {
+      const a = hist[k]; if (a.length < 2) return;
+      g.strokeStyle = col(c); g.lineWidth = 2; g.beginPath();
+      a.forEach((v, i) => {
+        const x = 34 + i * (w - 40) / (MAX - 1);
+        i ? g.lineTo(x, y(v)) : g.moveTo(x, y(v));
+      });
+      g.stroke();
+    });
+  }
+
+  window.addEventListener("resize", draw);
+  draw(); connect();
+</script>
+</body>
+</html>
